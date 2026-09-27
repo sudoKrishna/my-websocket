@@ -1,9 +1,16 @@
 import net from 'node:net';
 import * as crypto from 'node:crypto';
 
+ const clients = new Set<net.Socket>();
+
 const server = net.createServer((socket) => {
     let handshakeCompleted = false;
     let accumulatedData = Buffer.alloc(0);
+   
+
+    // Add the socket to the clients set immediately
+    clients.add(socket);
+    console.log(`New connection from ${socket.remoteAddress}`);
 
     socket.on('data', (data: Buffer) => {
         accumulatedData = Buffer.concat([accumulatedData, data]);
@@ -15,13 +22,14 @@ const server = net.createServer((socket) => {
             const request = accumulatedData.toString('utf8');
             console.log('Received request:\n', request);
 
-            const tokenMatch = request.match(/token=([^&\s]+)/i)
+            // Extract token from the request URL
+            const tokenMatch = request.match(/token=([^&\s]+)/i);
             const token = tokenMatch ? tokenMatch[1] : null;
 
             const VALID_TOKEN = 'abc123';
-            if(!token || token !== VALID_TOKEN) {
+            if (!token || token !== VALID_TOKEN) {
                 socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
-                return
+                return;
             }
 
             const requestLower = request.toLowerCase();
@@ -138,6 +146,15 @@ const server = net.createServer((socket) => {
                 // Text frame
                 const message = payload.toString('utf8');
                 console.log('Received text message:', message);
+
+                // Broadcast to all clients except the sender
+                clients.forEach((client) => {
+                    if (client !== socket) {
+                        sendText(client, `Broadcast: ${message}`);
+                    }
+                });
+
+                // Echo back to the sender (optional)
                 sendText(socket, message);
             } else if (opcode === 0x8) {
                 // Close frame
@@ -170,7 +187,8 @@ const server = net.createServer((socket) => {
     });
 
     socket.on('close', () => {
-        console.log('Socket closed');
+        console.log(`Connection closed from ${socket.remoteAddress}`);
+        clients.delete(socket); // Remove the socket from the clients set
     });
 });
 
